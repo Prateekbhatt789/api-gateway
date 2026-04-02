@@ -7,9 +7,11 @@ from services.redis_clients import get_redis
 from middleware.auth import authenticate_request
 from middleware.rate_limiter import check_rate_limit
 from router.register import router as register_router
+from router.proxy import router as proxy_router
 
 app = FastAPI(title="API Gateway")
 app.include_router(register_router)
+app.include_router(proxy_router)
 
 @app.on_event("startup")
 def on_startup():
