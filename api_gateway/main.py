@@ -74,7 +74,8 @@ async def auth_middleware(request: Request, call_next):
     latency_ms = (time.monotonic() - start_time) * 1000
     
     # ── 6. Build and write log (background — non-blocking) ────
-    user = request.state.user
+    # user = request.state.user
+    user = getattr(request.state,"user",None)
     log  = RequestLog(
         request_id       = request_id,
         user_id          = user.id,

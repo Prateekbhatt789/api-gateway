@@ -66,7 +66,7 @@ async def proxy(request: Request, path: str):
 
     # ── 2. Resolve backend ───────────────────────────────────
     backend_url, service_path = resolve_service(request.url.path)
-
+    request.state.upstream_service = backend_url  # ← add this line
     # Preserve query string — e.g. /users?page=2&limit=10
     query_string = request.url.query
     target_url   = f"{backend_url}{service_path}"
