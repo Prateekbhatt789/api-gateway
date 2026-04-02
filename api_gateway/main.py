@@ -1,9 +1,13 @@
 # main.py
+import time,uuid
 from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
+from fastapi.background import BackgroundTasks
 from sqlalchemy.orm import Session
 from services.sql_clients import init_db, get_db
 from services.redis_clients import get_redis
+from services.mongo_clients import init_mongo, write_log
+from models.log_schema import RequestLog
 from middleware.auth import authenticate_request
 from middleware.rate_limiter import check_rate_limit
 from router.register import router as register_router
@@ -14,8 +18,9 @@ app.include_router(register_router)
 app.include_router(proxy_router)
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     init_db()  # Creates tables if they don't exist
+    await init_mongo()
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
@@ -57,8 +62,35 @@ async def auth_middleware(request: Request, call_next):
         # Log this in production
         pass
 
-    # ── 3. Forward to route handler ──────────────────────────
+    # ── 3. Start request timer + assign request ID ────────────
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    start_time = time.monotonic()
+
+    # ── 4. Forward to route handler ───────────────────────────
     response = await call_next(request)
+
+    # ── 5. Calculate latency ──────────────────────────────────
+    latency_ms = (time.monotonic() - start_time) * 1000
+    
+    # ── 6. Build and write log (background — non-blocking) ────
+    user = request.state.user
+    log  = RequestLog(
+        request_id       = request_id,
+        user_id          = user.id,
+        user_name        = user.name,
+        method           = request.method,
+        path             = request.url.path,
+        status_code      = response.status_code,
+        latency_ms       = round(latency_ms, 2),
+        upstream_service = getattr(request.state, "upstream_service", None),
+        cache_hit        = getattr(request.state, "cache_hit", False),
+    )
+    # BackgroundTasks runs AFTER response is sent to client
+    background = BackgroundTasks()
+    background.add_task(write_log, log.to_dict())
+    response.background = background
+
     return response
 
 
