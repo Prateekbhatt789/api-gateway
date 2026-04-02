@@ -3,6 +3,8 @@ import httpx
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import Response
 from config import SERVICE_MAP, PROXY_TIMEOUT
+from middleware.cache import get_cached_response, store_response
+from services.redis_clients import get_redis
 
 router = APIRouter()
 
@@ -55,6 +57,14 @@ async def proxy(request: Request, path: str):
     Catch-all proxy route.
     Forwards any method to the appropriate backend service.
     """
+    redis = get_redis()
+
+    # ── 1. Cache check (GET only) ────────────────────────────
+    cached = get_cached_response(request, redis)
+    if cached:
+        return cached                         # returns immediately, skips backend
+
+    # ── 2. Resolve backend ───────────────────────────────────
     backend_url, service_path = resolve_service(request.url.path)
 
     # Preserve query string — e.g. /users?page=2&limit=10
@@ -89,6 +99,13 @@ async def proxy(request: Request, path: str):
             status_code=503,
             detail="Backend service is unreachable."
         )
+     # ── 4. Store in cache (GET + 2xx only) ───────────────────
+    store_response(
+        request,
+        backend_response.content,
+        backend_response.status_code,
+        redis
+    )
 
     # Pass backend response straight through — status, body, headers
     return Response(
