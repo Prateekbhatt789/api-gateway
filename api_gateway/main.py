@@ -12,10 +12,12 @@ from middleware.auth import authenticate_request
 from middleware.rate_limiter import check_rate_limit
 from router.register import router as register_router
 from router.proxy import router as proxy_router
+from router.admin import router as admin_router          # ← add
 
 app = FastAPI(title="API Gateway")
 app.include_router(register_router)
 app.include_router(proxy_router)
+app.include_router(admin_router)                        # ← add
 
 @app.on_event("startup")
 async def on_startup():
@@ -28,7 +30,7 @@ async def auth_middleware(request: Request, call_next):
     Runs before every request.
     Skips auth for health check so infra monitors still work.
     """
-    PUBLIC_PATHS = {"/health","/register","/docs","/openapi.json"}
+    PUBLIC_PATHS = {"/health","/register","/docs","/openapi.json","/register/admin"}
     if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
 
@@ -60,6 +62,9 @@ async def auth_middleware(request: Request, call_next):
                                 content={"error": exc.detail})
         # Redis is down → fail open (let request through)
         # Log this in production
+        # Redis down → fail open, but set defaults so /me doesn't 500
+        request.state.rate_limit_count     = 0          # ← add
+        request.state.rate_limit_remaining = -1   
         pass
 
     # ── 3. Start request timer + assign request ID ────────────
@@ -102,8 +107,11 @@ def health():
 
 @app.get("/me")
 async def who_am_i(request: Request):
-    user = request.state.user
-    return {"id": user.id, 
-            "name": user.name,
-            "request_used":request.state.rate_limit_count,
-            "request_remaining": request.state.rate_limit_remaining}
+    try:
+        user = request.state.user
+        return {"id": user.id, 
+                "name": user.name,
+                "request_used":request.state.rate_limit_count,
+                "request_remaining": request.state.rate_limit_remaining}
+    except Exception as err:
+        return {"Error":err}

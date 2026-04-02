@@ -11,4 +11,5 @@ class User(Base):
     name       = Column(String, nullable=False)
     key_hash   = Column(String, unique=True, index=True, nullable=False)
     is_active  = Column(Boolean, default=True)
+    is_admin   = Column(Boolean, default=False)   # ← add this
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
